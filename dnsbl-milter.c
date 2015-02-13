@@ -21,6 +21,10 @@
  *
  */
 
+/*
+ * Extended by Robin to provide a separate config file
+ */
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -47,15 +51,22 @@
 #include "libmilter/mfapi.h"
 #define GETCONTEXT(ctx)  ((struct mlfiPriv *) smfi_getpriv(ctx))
 
+#include "ini.h"
 
 #define DNSL_NEXIST 0
 #define DNSL_EXIST  1
 #define DNSL_FAIL   2
 typedef uint8_t dnsl_t;
 
+#define DNSBL_MILTER_CONFIG "/etc/mail/dnsbl-milter.ini"
+#define DNSBL_MILTER_CONFIG_SECTION "DNSBL"
+#define DNSBL_MILTER_CONFIG_BLACKLIST "blacklist"
+#define DNSBL_MILTER_CONFIG_WHITELIST "whitelist"
+#define DNSBL_MILTER_CONFIG_SEPARATOR ','
+
+
 static dnsl_t dns_check(const uint8_t, const uint8_t, const uint8_t,
 			const uint8_t, const char *);
-
 
 struct listNode {
 	char *dnsl;
@@ -68,7 +79,7 @@ struct listNode *whitelist;
 
 static int list_add(struct listNode **, const char *, const char *);
 static int list_free(struct listNode **);
-
+static int parse_dnsbl_milter_config (void*, const char*, const char*, const char*);
 
 #define STAMP_PASSED      0
 #define STAMP_WHITELISTED 1
@@ -309,18 +320,13 @@ int main(int argc, char **argv)
 		exit(EX_UNAVAILABLE);
 	}
 
-	/* List of blacklists to use */
-	list_add(&blacklist, "bl.spamcop.net",
-		 "Listed on SpamCop. See http://spamcop.net/w3m?action=checkblock&ip=");
-	list_add(&blacklist, "b.barracudacentral.org",
-		 "Listed on Barracuda Reputation Block List (BRBL). See http://www.barracudacentral.org/lookups?ip_address=");
-	list_add(&blacklist, "zen.spamhaus.org",
-		 "Listed on The Spamhaus Project. See http://www.spamhaus.org/query/bl?ip=");
-	list_add(&blacklist, "psbl.surriel.com",
-		 "Listed on The Passive Spam Block List. See http://psbl.surriel.com/listing?ip=");
+	/* If config file does not exist or otherwise not accessible, exit */
+	if( access(DNSBL_MILTER_CONFIG, R_OK) != 0 ) {
+	  mlog(LOG_ERR, "Can't access %s", DNSBL_MILTER_CONFIG);
+	  exit(1);
+	} 
 
-	/* List of whitelists to use */
-	list_add(&whitelist, "list.dnswl.org", "http://www.dnswl.org");
+        ini_parse (DNSBL_MILTER_CONFIG, parse_dnsbl_milter_config, NULL);
 
 	if ((usr != NULL) || (grp != NULL))
 		if (drop_privs(usr, grp) != 0)
@@ -982,4 +988,37 @@ static void pidf_create(const char *pidf)
 static void pidf_destroy(const char *pidf)
 {
 	unlink(pidf);
+}
+
+static int parse_dnsbl_milter_config (void* user, const char* section, const char* name, const char* value)
+{
+
+  char* comment;
+
+  #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
+  if ( (MATCH(DNSBL_MILTER_CONFIG_SECTION, DNSBL_MILTER_CONFIG_BLACKLIST)) ||
+       (MATCH(DNSBL_MILTER_CONFIG_SECTION, DNSBL_MILTER_CONFIG_WHITELIST)) ){
+
+    comment = strchr(value, DNSBL_MILTER_CONFIG_SEPARATOR);
+
+    // if users do not specify comment, just repeat the RBL in the comment
+    if ( comment == NULL ){
+      comment = value;
+    }
+    else{
+      // increment the position  
+      comment++;
+    }    
+  }
+
+  if (MATCH(DNSBL_MILTER_CONFIG_SECTION, DNSBL_MILTER_CONFIG_BLACKLIST)) {
+    list_add (&blacklist, value, comment);
+  } 
+
+  if (MATCH(DNSBL_MILTER_CONFIG_SECTION, DNSBL_MILTER_CONFIG_WHITELIST)) {
+    list_add (&whitelist, value, comment);
+  }
+
+  return 1;
+  
 }
