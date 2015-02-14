@@ -17,16 +17,18 @@ Sometimes, it is useful to be able to whitelist and blacklist based on a combina
 `/etc/mail/dnsbl-milter.db` controls that. `/etc/mail/dnsbl-milter.db` is typically made via `cd /etc/mail && makemap hash dnsbl-milter < dnsbl-milter`.
 
 `dnsbl-milter` will do the look up in the following priority for either value `1` (check blacklist) or `0` (skip blacklist):
-1. [from:]sender_address[to:]recipient_address
-1. [from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3.ip_octet4
-1. [from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3
-1. [from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2
-1. [from:]sender_address[connect:]smtp_connection_ip_octet_1
-1. [connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3.ip_octet4
-1. [connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3
-1. [connect:]smtp_connection_ip_octet_1.ip_octet_2
-1. [connect:]smtp_connection_ip_octet_1
-1. [default]
+```
+[from:]sender_address[to:]recipient_address
+[from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3.ip_octet4
+[from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3
+[from:]sender_address[connect:]smtp_connection_ip_octet_1.ip_octet_2
+[from:]sender_address[connect:]smtp_connection_ip_octet_1
+[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3.ip_octet4
+[connect:]smtp_connection_ip_octet_1.ip_octet_2.ip_octet_3
+[connect:]smtp_connection_ip_octet_1.ip_octet_2
+[connect:]smtp_connection_ip_octet_1
+[default]
+```
 
 For instance, with the following `/etc/mail/dnsbl-milter` (that is made into `/etc/mail/dnsbl-milter.db`):
 ```
