@@ -22,7 +22,8 @@
  */
 
 /*
- * Extended by Robin to provide a separate config file
+ * Extended by Robin to provide a separate config file.
+ *  Provide a way to have a more comphrehensive opt-out of dnsbl-milter.
  */
 
 #include <arpa/inet.h>
@@ -47,6 +48,8 @@
 # endif
 #include <time.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <db.h>
 
 #include "libmilter/mfapi.h"
 #define GETCONTEXT(ctx)  ((struct mlfiPriv *) smfi_getpriv(ctx))
@@ -63,7 +66,13 @@ typedef uint8_t dnsl_t;
 #define DNSBL_MILTER_CONFIG_BLACKLIST "blacklist"
 #define DNSBL_MILTER_CONFIG_WHITELIST "whitelist"
 #define DNSBL_MILTER_CONFIG_SEPARATOR ','
+#define DNSBL_MILTER_DB "/etc/mail/dnsbl-milter.db"
+#define MAX_EMAIL_LENGTH 256
 
+char* db_look_up (char*, const char*);
+int is_numeric(const char*);
+
+char* get_canonical_address (char*);
 
 static dnsl_t dns_check(const uint8_t, const uint8_t, const uint8_t,
 			const uint8_t, const char *);
@@ -74,11 +83,20 @@ struct listNode {
 	struct listNode *next;
 };
 
+struct queryNode {
+        char *query;
+        struct queryNode *next; 
+};
+
 struct listNode *blacklist;
 struct listNode *whitelist;
 
 static int list_add(struct listNode **, const char *, const char *);
 static int list_free(struct listNode **);
+
+int query_node_add (struct queryNode **, const char*);
+int query_node_free (struct queryNode **);
+
 static int parse_dnsbl_milter_config (void*, const char*, const char*, const char*);
 
 #define STAMP_PASSED      0
@@ -98,6 +116,7 @@ struct mlfiPriv {
 
 sfsistat mlfi_connect(SMFICTX *, char *, _SOCK_ADDR *);
 sfsistat mlfi_envfrom(SMFICTX *, char **);
+sfsistat mlfi_envrcpt(SMFICTX *, char **);
 sfsistat mlfi_eom(SMFICTX *);
 sfsistat mlfi_eoh(SMFICTX *);
 sfsistat mlfi_abort(SMFICTX *);
@@ -115,7 +134,7 @@ struct smfiDesc smfilter = {
 	mlfi_connect,		/* connection info filter */
 	NULL,			/* SMTP HELO command filter */
 	mlfi_envfrom,		/* envelope sender filter */
-	NULL,			/* envelope recipient filter */
+	mlfi_envrcpt,		/* envelope recipient filter */
 	NULL,			/* header filter */
 #if SMFI_VERSION > 3
 	NULL,			/* end of header */
@@ -142,6 +161,7 @@ static void daemonize(void);
 static int drop_privs(const char *, const char *);
 static void pidf_create(const char *);
 static void pidf_destroy(const char *);
+int ordered_query_dnsbl_milter_db (char*, char*, int, const char*, int);
 
 #ifdef __linux__
 # define HAS_LONGOPT 1
@@ -508,8 +528,38 @@ sfsistat mlfi_envfrom(SMFICTX * ctx, char **argv)
 #endif
 
 	priv->check = 0;
-	return mlfi_dnslcheck(ctx);
+
+        return SMFIS_CONTINUE;
 }
+
+sfsistat mlfi_envrcpt(SMFICTX * ctx, char **argv)
+{
+  struct mlfiPriv *priv = GETCONTEXT(ctx);
+  char* envto = argv[0];
+
+  char *canonical_from = get_canonical_address(priv->envfrom);
+  char *canonical_to = get_canonical_address(envto);
+
+  if ( canonical_from == NULL || canonical_to == NULL ){
+    if ( canonical_from != NULL ){ free (canonical_from);  }
+    if ( canonical_to != NULL ){ free (canonical_to); }
+    mlog (LOG_ERR, "Failed to get canonical addresses");
+    return SMFIS_TEMPFAIL;
+  }
+  int spamcheck = ordered_query_dnsbl_milter_db (canonical_from, canonical_to, priv->hostaddr, DNSBL_MILTER_DB, 1);
+
+  if ( canonical_from != NULL){ free (canonical_from); }
+  if ( canonical_to != NULL){ free (canonical_to); }
+
+  if ( spamcheck ){ return mlfi_dnslcheck(ctx); }
+  else{
+    priv->stamp = STAMP_SKIPPED;
+  }
+
+  return SMFIS_CONTINUE;
+
+}
+
 
 #if SMFI_VERSION <= 3
 sfsistat mlfi_eoh(SMFICTX * ctx)
@@ -1021,4 +1071,187 @@ static int parse_dnsbl_milter_config (void* user, const char* section, const cha
 
   return 1;
   
+}
+
+char* db_look_up (char* look_up_key, const char* db)
+{
+
+  DB *dbp;
+  DBT key, value;
+
+  memset(&key, 0, sizeof(DBT));
+  memset(&value, 0, sizeof(DBT));
+
+  if (db_create(&dbp, NULL, 0)){ 
+    return NULL; 
+  }
+
+  if ( dbp->open(dbp, NULL, db, NULL, DB_HASH, DB_RDONLY, 0) ){
+    return NULL;
+  }
+
+  key.data = look_up_key;
+  key.size = strlen(look_up_key);
+
+  if ( dbp->get(dbp, NULL, &key, &value, 0) ){
+    return NULL;
+  }
+
+  return strdup((char*) value.data);
+
+}
+
+int ordered_query_dnsbl_milter_db (char* from, char* to, int connect_from_ip, const char* db, int default_return){
+  
+  struct queryNode* q = NULL;
+
+  uint8_t a = (connect_from_ip & 0xff000000) >> 24;
+  uint8_t b = (connect_from_ip & 0x00ff0000) >> 16;
+  uint8_t c = (connect_from_ip & 0x0000ff00) >> 8;
+  uint8_t d = (connect_from_ip & 0x000000ff);
+
+  /* OK, we are constructing various queries
+     twice the email length + strlen(from:) + strlen(connect:)
+     is more than enough */
+
+  int max_key_length = MAX_EMAIL_LENGTH*2+strlen("from:")+strlen("connect:");
+  char* key = (char*) malloc(sizeof(char)*max_key_length);
+
+  snprintf(key, max_key_length-1, "[from:]%s[to:]%s", from, to);
+  query_node_add( &q, key);
+
+  snprintf(key, max_key_length-1, "[from:]%s[connect:]%u.%u.%u.%u", from, a, b, c, d);
+  query_node_add( &q, key);
+
+  snprintf(key, max_key_length-1, "[from:]%s[connect:]%u.%u.%u", from, a, b, c);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[from:]%s[connect:]%u.%u", from, a, b);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[from:]%s[connect:]%u", from, a);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[connect:]%u.%u.%u.%u", a, b, c, d);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[connect:]%u.%u.%u", a, b, c);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[connect:]%u.%u", a, b);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[connect:]%u", a);
+  query_node_add ( &q, key );
+
+  snprintf(key, max_key_length-1, "[default]");
+  query_node_add ( &q, key );
+
+  struct queryNode *n;
+  char *queryval = NULL;
+  
+  n = q;
+  while ( n != NULL && queryval == NULL){
+    queryval = db_look_up (n->query, db);
+    n = n->next;
+  }
+
+  query_node_free ( &q );
+
+  /* Did not find anything in DB, return specified default instead */
+  if ( queryval == NULL ){
+    return default_return;
+  }
+
+  /* DB has invalid values: return default instead */
+  if ( ! is_numeric(queryval) ){
+    free(queryval);
+    return default_return;
+  }
+
+  int ret = atoi(queryval);
+  free(queryval);
+
+  return ret;
+
+}
+
+int query_node_add (struct queryNode **q, const char* key){
+
+  struct queryNode *node;
+  struct queryNode *n;
+
+  node = malloc(sizeof(struct queryNode));
+  if (node == NULL){
+    mlog(LOG_ERR, "query_node_add failed %s", key);
+    return 1;
+  }
+
+  node->query = strdup(key);
+  node->next = NULL;
+
+  if ( node->query == NULL){
+    mlog(LOG_ERR, "failed allocating memory on query_node_add");
+    return 1;
+  }
+
+  if ( *q == NULL ){
+    *q = node;
+    return 0;
+  }
+  
+  n = (struct listNode *) *q;
+  while (n->next != NULL)
+    n = n->next;
+
+  n->next = node;
+  return 0;
+
+}
+
+int query_node_free (struct queryNode **q){
+
+  struct queryNode *n, *c;
+  
+  n = (struct queryNode*) *q;
+  while (n != NULL){
+    c = n;
+    n = n->next;
+    
+    if ( c->query != NULL ){ free(c->query); }
+    free (c);
+  }
+
+  return 0;
+
+}
+
+int is_numeric(const char* s)
+{
+  while(*s){
+      if(!isdigit(*s)){ return 0; }
+      s++;
+  }
+  return 1;  
+}
+
+char* get_canonical_address(char* address){
+
+  char* t = (char*) malloc(sizeof(char) * (strlen(address)+1));
+  unsigned int i, t_i;
+
+  if ( t == NULL ){ 
+    return NULL;
+  }
+
+  for (i=0, t_i=0; i < strlen(address); i++){
+    if ( address[i] != '<' && address[i] != '>' ){
+      t[t_i] = address[i];
+      t_i++;
+    }
+  }
+  t[t_i] = '\0';
+
+  return t;
+
 }
