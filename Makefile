@@ -22,13 +22,22 @@ PROGNAME = dnsbl-milter
 
 INSTPATH = /usr/local/sbin/
 
-INCDIRS  = -I/usr/include/libmilter/
+INCDIRS  = -I/usr/include/libmilter/ -I./inih/include
 LIBDIRS  = -L/usr/lib/ -L/usr/lib/libmilter/
 
-default all: main
+DEPENDENCIES = ini.o
 
-main: $(PROGNAME).c
-	$(CC) $(WARN) $(CFLAGS) -D_REENTRANT $(PROGNAME).c -o $(PROGNAME) $(LIBS) $(INCDIRS) $(LIBDIRS)
+default all: $(PROGNAME)
+
+ini.o: ./inih/lib/ini.c
+	$(CC) $(WARN) $(INCDIRS) -c ./inih/lib/ini.c
+
+$(PROGNAME).o: $(PROGNAME).c
+	$(CC) $(WARN) $(CFLAGS) -D_REENTRANT $(LIBS) $(INCDIRS) $(LIBDIRS) -c $(PROGNAME).c
+
+
+$(PROGNAME): $(PROGNAME).o $(DEPENDENCIES)
+	$(CC) $(PROGNAME).o $(DEPENDENCIES) $(LIBS) $(INCDIRS) $(LIBDIRS) -o $(PROGNAME)
 
 install: $(PROGNAME)
 	if [ -f "$(INSTPATH)/$(PROGNAME)" ]; then \
@@ -38,4 +47,4 @@ install: $(PROGNAME)
 	strip $(INSTPATH)/$(PROGNAME)
 
 clean:
-	if [ -f $(PROGNAME) ]; then rm -f $(PROGNAME); fi
+	rm -f $(PROGNAME) $(PROGNAME).o $(DEPENDENCIES)
