@@ -1,6 +1,19 @@
 dnsbl-milter
 ============
 
+## How to install on Redhat/CentOS 6##
+
+1. `git clone --recursive https://github.com/robin81/dnsbl-milter.git`
+1. `yum -y install db4-devel glibc-devel make gcc sendmail-cf`
+1. `useradd -u milter`
+1. `make && make install`
+
+## Main Configuration Files ##
+1. `/etc/mail/dnsbl-milter.ini`
+1. `/etc/mail/dnsbl-milter` made into `/etc/mail/dnsbl-milter.db` via `makemap hash dnsbl-milter < dnsbl-milter`
+
+## Configuration Details ##
+
 A lightweight and flexible Sendmail DNSBL &amp; DNSWL mail filter (milter). dnsbl-milter consults a set of DNS black lists and white lists to determine if messages from particular hosts should be accepted.
 
 Configuration file at /etc/mail/dnsbl-milter.ini:
