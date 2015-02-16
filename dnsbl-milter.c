@@ -541,15 +541,15 @@ sfsistat mlfi_envrcpt(SMFICTX * ctx, char **argv)
   char *canonical_to = get_canonical_address(envto);
 
   if ( canonical_from == NULL || canonical_to == NULL ){
-    if ( canonical_from != NULL ){ free (canonical_from);  }
-    if ( canonical_to != NULL ){ free (canonical_to); }
+    free (canonical_from);  
+    free (canonical_to);
     mlog (LOG_ERR, "Failed to get canonical addresses");
     return SMFIS_TEMPFAIL;
   }
   int spamcheck = ordered_query_dnsbl_milter_db (canonical_from, canonical_to, priv->hostaddr, DNSBL_MILTER_DB, 1);
 
-  if ( canonical_from != NULL){ free (canonical_from); }
-  if ( canonical_to != NULL){ free (canonical_to); }
+  free (canonical_from); 
+  free (canonical_to);
 
   if ( spamcheck ){ return mlfi_dnslcheck(ctx); }
   else{
