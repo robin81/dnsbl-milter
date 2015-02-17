@@ -17,7 +17,7 @@
 #
 
 WARN     = -Wall -Wextra -Wpointer-arith -Wstrict-prototypes -O2
-LIBS     = -lmilter -lpthread
+LIBS     = -lmilter -lpthread -ldb
 PROGNAME = dnsbl-milter
 
 INSTPATH = /usr/local/sbin/
