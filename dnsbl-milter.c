@@ -1117,6 +1117,11 @@ int ordered_query_dnsbl_milter_db (char* from, char* to, int connect_from_ip, co
   int max_key_length = MAX_EMAIL_LENGTH*2+strlen("from:")+strlen("connect:");
   char* key = (char*) malloc(sizeof(char)*max_key_length);
 
+  if ( key == NULL ){
+    mlog (LOG_ERR, "Cannot allocate memory");
+    return SMFIS_TEMPFAIL;
+  }
+
   snprintf(key, max_key_length-1, "[from:]%s[to:]%s", from, to);
   query_node_add( &q, key);
 
@@ -1146,6 +1151,8 @@ int ordered_query_dnsbl_milter_db (char* from, char* to, int connect_from_ip, co
 
   snprintf(key, max_key_length-1, "[default]");
   query_node_add ( &q, key );
+
+  free(key);
 
   struct queryNode *n;
   char *queryval = NULL;
