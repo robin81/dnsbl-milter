@@ -1,6 +1,20 @@
 dnsbl-milter
 ============
 
+## How to install on Redhat/CentOS 6##
+
+1. `git clone --recursive https://github.com/robin81/dnsbl-milter.git`
+1. `yum -y install db4-devel glibc-devel make gcc sendmail-cf`
+1. `useradd -u milter`
+1. `make && make install`
+1. `cp ./init.d/dnsbl-milter /etc/init.d/dnsbl-milter && chkconfig dnsbl-milter on && service dnsbl-milter start`
+
+## Main Configuration Files ##
+1. `/etc/mail/dnsbl-milter.ini`
+1. `/etc/mail/dnsbl-milter` made into `/etc/mail/dnsbl-milter.db` via `makemap hash dnsbl-milter < dnsbl-milter`
+
+## Configuration Details ##
+
 A lightweight and flexible Sendmail DNSBL &amp; DNSWL mail filter (milter). dnsbl-milter consults a set of DNS black lists and white lists to determine if messages from particular hosts should be accepted.
 
 Configuration file at /etc/mail/dnsbl-milter.ini:
@@ -40,3 +54,10 @@ we will ensure that any emails that satisfy sender address `bob@bob.com` and rec
 
 We are aware that from addresses are easily spoofable. It is useful to whitelist based on `from` and `to` combination. For instance, your organization expects important emails from `bob@bob.com` to `alice@alice.com` and `bob@bob.com` seems to have IPs of ill repute. Such whitelists can ensure that those important emails will never be bounced due to a RBL blacklist. Given the specificity of the whitelists, the organization may deem it to be acceptable to have such a whitelist.
 
+## Sendmail Configuration Details ##
+
+You can put the following into `/etc/mail/sendmail.mc` before `MAILER` definitions:
+```
+INPUT_MAIL_FILTER(`dnsbl-milter', `S=unix:/var/run/milter/dnsbl-milter.sock, T=C:5m;S:20s;R:5m;E:10m, F=T')dnl
+```
+and compile it into `sendmail.cf` via `cd /etc/mail && make`
