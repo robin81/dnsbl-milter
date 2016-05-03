@@ -97,7 +97,7 @@ static int list_free(struct listNode **);
 int query_node_add (struct queryNode **, const char*);
 int query_node_free (struct queryNode **);
 
-static int parse_dnsbl_milter_config (void*, const char*, const char*, const char*);
+static int parse_config (void*, const char*, const char*, const char*);
 
 #define STAMP_PASSED      0
 #define STAMP_WHITELISTED 1
@@ -161,7 +161,7 @@ static void daemonize(void);
 static int drop_privs(const char *, const char *);
 static void pidf_create(const char *);
 static void pidf_destroy(const char *);
-int ordered_query_dnsbl_milter_db (char*, char*, int, const char*, int);
+int query_setting (char*, char*, int, const char*, int);
 
 #ifdef __linux__
 # define HAS_LONGOPT 1
@@ -346,7 +346,7 @@ int main(int argc, char **argv)
 	  exit(1);
 	} 
 
-        ini_parse (DNSBL_MILTER_CONFIG, parse_dnsbl_milter_config, NULL);
+        ini_parse (DNSBL_MILTER_CONFIG, parse_config, NULL);
 
 	if ((usr != NULL) || (grp != NULL))
 		if (drop_privs(usr, grp) != 0)
@@ -548,7 +548,7 @@ sfsistat mlfi_envrcpt(SMFICTX * ctx, char **argv)
     mlog (LOG_ERR, "Failed to get canonical addresses");
     return SMFIS_TEMPFAIL;
   }
-  int spamcheck = ordered_query_dnsbl_milter_db (canonical_from, canonical_to, priv->hostaddr, DNSBL_MILTER_DB, 1);
+  int spamcheck = query_setting (canonical_from, canonical_to, priv->hostaddr, DNSBL_MILTER_DB, 1);
 
   free (canonical_from); 
   canonical_from = NULL;
@@ -1044,7 +1044,7 @@ static void pidf_destroy(const char *pidf)
 	unlink(pidf);
 }
 
-static int parse_dnsbl_milter_config (void* user, const char* section, const char* name, const char* value)
+static int parse_config (void* user, const char* section, const char* name, const char* value)
 {
 
   char* comment;
@@ -1105,7 +1105,7 @@ char* db_look_up (char* look_up_key, const char* db)
 
 }
 
-int ordered_query_dnsbl_milter_db (char* from, char* to, int connect_from_ip, const char* db, int default_return){
+int query_setting (char* from, char* to, int connect_from_ip, const char* db, int default_return){
   
   struct queryNode* q = NULL;
 
